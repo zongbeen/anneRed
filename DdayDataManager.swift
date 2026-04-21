@@ -1,9 +1,10 @@
 //
 //  DdayDataManager.swift
-//  Clock
+//  anneRed
 //
-//  Created by zongbeen on 2024/04/04.
+//  Created by zongbeen on 4/20/26.
 //
+
 
 import UIKit
 import CoreData

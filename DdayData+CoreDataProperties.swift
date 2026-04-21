@@ -1,17 +1,16 @@
 //
 //  DdayData+CoreDataProperties.swift
-//  Clock
+//  anneRed
 //
-//  Created by zongbeen on 2024/04/04.
+//  Created by zongbeen on 4/20/26.
 //
-//
+
 
 import Foundation
 import CoreData
 
 
 extension DdayData {
-
     @nonobjc public class func fetchRequest() -> NSFetchRequest<DdayData> {
         return NSFetchRequest<DdayData>(entityName: "DdayData")
     }
