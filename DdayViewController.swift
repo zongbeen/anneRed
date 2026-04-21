@@ -1,28 +1,21 @@
 //
-//  ViewController.swift
-//  Day
+//  DdayViewController.swift
+//  anneRed
 //
-//  Created by zongbeen on 2024/04/02.
+//  Created by zongbeen on 4/20/26.
 //
 
 import UIKit
 import WidgetKit
 
 class DdayViewController: UIViewController {
-
-    // MARK: - IBOutlets
-
     @IBOutlet weak var tableView: UITableView!
-
-    // MARK: - Properties
-
     let manager = DdayDataManager.shared
     var isEditingMode = false
 
     private let maxPinnedCount = 2
     private let pinnedDatesKey = "pinnedDates"
 
-    // App Group suite name — Xcode에서 설정한 App Group ID와 일치해야 합니다
     static let appGroupID = "group.com.zongbeen.anneRed"
     static var sharedDefaults: UserDefaults { UserDefaults(suiteName: appGroupID) ?? .standard }
 
@@ -40,8 +33,6 @@ class DdayViewController: UIViewController {
     lazy var rightBarButton: UIBarButtonItem = {
         UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(rightBarButtonTapped))
     }()
-
-    // MARK: - Lifecycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -62,8 +53,6 @@ class DdayViewController: UIViewController {
         super.viewWillDisappear(animated)
     }
 
-    // MARK: - Setup
-
     private func setupNavigationBar() {
         self.navigationController?.navigationBar.prefersLargeTitles = true
         self.title = "Record"
@@ -81,8 +70,6 @@ class DdayViewController: UIViewController {
             tableView.sectionHeaderTopPadding = 0
         }
     }
-
-    // MARK: - Pinned Persistence
 
     private func loadPinnedDates() -> [String] {
         let shared = DdayViewController.sharedDefaults
@@ -135,8 +122,6 @@ class DdayViewController: UIViewController {
         else { return "D+\(abs(daysLeft))" }
     }
 
-    // MARK: - Data
-
     func updateStoredPinnedDate(from originalDate: Date, to newDate: Date) {
         let formatter = ISO8601DateFormatter()
         var savedDates = loadPinnedDates()
@@ -168,8 +153,6 @@ class DdayViewController: UIViewController {
         return indexPath.section == Section.pinned.rawValue ? pinnedData[indexPath.row] : unpinnedData[indexPath.row]
     }
 
-    // MARK: - Actions
-
     @objc func leftBarButtonTapped() {
         isEditingMode = !isEditingMode
         leftBarButton.title = isEditingMode ? "Done" : "Edit"
@@ -196,8 +179,6 @@ class DdayViewController: UIViewController {
         }
     }
 }
-
-// MARK: - UITableViewDelegate, UITableViewDataSource
 
 extension DdayViewController: UITableViewDelegate, UITableViewDataSource {
 
@@ -280,8 +261,6 @@ extension DdayViewController: UITableViewDelegate, UITableViewDataSource {
         self.performSegue(withIdentifier: "DdayViewController", sender: self)
         tableView.deselectRow(at: indexPath, animated: true)
     }
-
-    // MARK: - Leading Swipe (Pin / Unpin)
 
     func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         let isPinned = indexPath.section == Section.pinned.rawValue

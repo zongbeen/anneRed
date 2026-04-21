@@ -1,20 +1,15 @@
 //
-//  PickerViewController.swift
-//  Day
+//  DatePickerViewController.swift
+//  anneRed
 //
-//  Created by zongbeen on 2024/04/03.
+//  Created by zongbeen on 4/20/26.
 //
 
 import UIKit
 
 class DatePickerViewController: UIViewController {
-
-    // MARK: - IBOutlets
-
     @IBOutlet weak var datePicker: UIDatePicker!
     @IBOutlet weak var tableView: UITableView!
-
-    // MARK: - Properties
 
     let manager = DdayDataManager.shared
     var data: DdayData? {
@@ -32,8 +27,6 @@ class DatePickerViewController: UIViewController {
     private var caculInputText: String = ""
     private var caculResultText: String = ""
 
-    // MARK: - Lifecycle
-
     override func viewDidLoad() {
         super.viewDidLoad()
         setupNavigationBar()
@@ -46,8 +39,6 @@ class DatePickerViewController: UIViewController {
         super.viewWillDisappear(animated)
         NotificationCenter.default.removeObserver(self)
     }
-
-    // MARK: - Setup
 
     private func setupNavigationBar() {
         self.title = "Add List"
@@ -86,8 +77,6 @@ class DatePickerViewController: UIViewController {
         updateDdayLabel()
     }
 
-    // MARK: - Keyboard
-
     @objc private func dismissKeyboard() {
         view.endEditing(true)
     }
@@ -104,8 +93,6 @@ class DatePickerViewController: UIViewController {
         tableView.contentInset.bottom = 0
         tableView.verticalScrollIndicatorInsets.bottom = 0
     }
-
-    // MARK: - D-Day Logic
 
     func updateDdayLabel() {
         selectedDate = datePicker.date
@@ -151,8 +138,6 @@ class DatePickerViewController: UIViewController {
         guard let cell = tableView.cellForRow(at: IndexPath(row: 0, section: 1)) else { return }
         (cell.contentView.viewWithTag(3) as? UILabel)?.text = caculResultText
     }
-
-    // MARK: - Actions
 
     @objc func leftBarButtonTapped() {
         self.dismiss(animated: true)
@@ -218,8 +203,6 @@ class DatePickerViewController: UIViewController {
         caculateDay()
     }
 }
-
-// MARK: - UITableViewDelegate, UITableViewDataSource
 
 extension DatePickerViewController: UITableViewDelegate, UITableViewDataSource {
     func numberOfSections(in tableView: UITableView) -> Int {
