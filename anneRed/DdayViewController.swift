@@ -38,6 +38,23 @@ class DdayViewController: UIViewController {
         super.viewDidLoad()
         setupNavigationBar()
         setupTableView()
+        // 날짜가 바뀌면(자정) D-Day 자동 갱신
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleDayChanged),
+            name: .NSCalendarDayChanged,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self, name: .NSCalendarDayChanged, object: nil)
+    }
+
+    @objc private func handleDayChanged() {
+        DispatchQueue.main.async { [weak self] in
+            self?.reloadAllData()
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -101,12 +118,11 @@ class DdayViewController: UIViewController {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let dateString = first.selectedDate.map { dateFormatter.string(from: $0) } ?? ""
-        let dday = calculateDday(selectedDate: first.selectedDate ?? Date())
 
+        // dday는 위젯이 매일 자정에 직접 계산하므로 날짜만 전달
         let dict: [String: String] = [
             "title": first.title ?? "",
-            "date": dateString,
-            "dday": dday
+            "date": dateString
         ]
         shared.set(dict, forKey: "widgetData")
         print("✅ widgetData 저장: \(dict)")
