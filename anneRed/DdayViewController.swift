@@ -14,7 +14,8 @@ class DdayViewController: UIViewController {
     var isEditingMode = false
 
     private let maxPinnedCount = 2
-    private let pinnedDatesKey = "pinnedDates"
+    private let pinnedIDsKey = "pinnedIDs"
+    private let legacyPinnedDatesKey = "pinnedDates"
 
     static let appGroupID = "group.com.zongbeen.anneRed"
     static var sharedDefaults: UserDefaults { UserDefaults(suiteName: appGroupID) ?? .standard }
@@ -88,19 +89,36 @@ class DdayViewController: UIViewController {
         }
     }
 
-    private func loadPinnedDates() -> [String] {
+    private func loadPinnedIDs() -> [UUID] {
         let shared = DdayViewController.sharedDefaults
-        if let migrated = UserDefaults.standard.stringArray(forKey: pinnedDatesKey) {
-            shared.set(migrated, forKey: pinnedDatesKey)
-            UserDefaults.standard.removeObject(forKey: pinnedDatesKey)
+
+        // UserDefaults.standard → App Group 1회 이관 (기존 마이그레이션 유지)
+        if let migrated = UserDefaults.standard.stringArray(forKey: legacyPinnedDatesKey) {
+            shared.set(migrated, forKey: legacyPinnedDatesKey)
+            UserDefaults.standard.removeObject(forKey: legacyPinnedDatesKey)
         }
-        return shared.stringArray(forKey: pinnedDatesKey) ?? []
+
+        // 이미 UUID 배열이 있으면 그대로
+        if let ids = shared.stringArray(forKey: pinnedIDsKey) {
+            return ids.compactMap { UUID(uuidString: $0) }
+        }
+
+        // 레거시 ISO 날짜 배열 → UUID 1회 변환
+        guard let legacy = shared.stringArray(forKey: legacyPinnedDatesKey) else { return [] }
+        let formatter = ISO8601DateFormatter()
+        let dates = legacy.compactMap { formatter.date(from: $0) }
+        let all = manager.getSavedData()
+        let ids: [UUID] = dates.compactMap { date in
+            all.first { Calendar.current.isDate($0.selectedDate ?? .distantPast, inSameDayAs: date) }?.id
+        }
+        shared.set(ids.map { $0.uuidString }, forKey: pinnedIDsKey)
+        shared.removeObject(forKey: legacyPinnedDatesKey)
+        return ids
     }
 
-    private func savePinnedDates() {
-        let formatter = ISO8601DateFormatter()
-        let dates = pinnedData.compactMap { $0.selectedDate }.map { formatter.string(from: $0) }
-        DdayViewController.sharedDefaults.set(dates, forKey: pinnedDatesKey)
+    private func savePinnedIDs() {
+        let ids = pinnedData.compactMap { $0.id?.uuidString }
+        DdayViewController.sharedDefaults.set(ids, forKey: pinnedIDsKey)
         saveWidgetData()
     }
 
@@ -138,31 +156,16 @@ class DdayViewController: UIViewController {
         else { return "D+\(abs(daysLeft))" }
     }
 
-    func updateStoredPinnedDate(from originalDate: Date, to newDate: Date) {
-        let formatter = ISO8601DateFormatter()
-        var savedDates = loadPinnedDates()
-        guard !savedDates.isEmpty else { return }
-        let pinnedDates = savedDates.compactMap { formatter.date(from: $0) }
-        if let idx = pinnedDates.firstIndex(where: { Calendar.current.isDate($0, inSameDayAs: originalDate) }) {
-            savedDates[idx] = formatter.string(from: newDate)
-            DdayViewController.sharedDefaults.set(savedDates, forKey: pinnedDatesKey)
-        }
-    }
-
     func reloadAllData() {
         let all = manager.getSavedData()
-        let formatter = ISO8601DateFormatter()
-        let savedDates = loadPinnedDates()
-        let pinnedDates = savedDates.compactMap { formatter.date(from: $0) }
+        let pinnedIDs = loadPinnedIDs()
 
         // 저장된 순서 유지
-        pinnedData = pinnedDates.compactMap { date in
-            all.first { Calendar.current.isDate($0.selectedDate ?? .distantPast, inSameDayAs: date) }
-        }
-        let pinnedSet = Set(pinnedData.compactMap { $0.selectedDate })
-        unpinnedData = all.filter { $0.selectedDate.map { !pinnedSet.contains($0) } ?? true }
+        pinnedData = pinnedIDs.compactMap { id in all.first { $0.id == id } }
+        let pinnedSet = Set(pinnedData.compactMap { $0.id })
+        unpinnedData = all.filter { $0.id.map { !pinnedSet.contains($0) } ?? true }
         saveWidgetData()
-        tableView.reloadData()
+        tableView.reloadData()   // Task 5에서 apply(snapshot)으로 교체
     }
 
     private func item(at indexPath: IndexPath) -> DdayData {
@@ -266,7 +269,7 @@ extension DdayViewController: UITableViewDelegate, UITableViewDataSource {
             } else {
                 unpinnedData.remove(at: indexPath.row)
             }
-            savePinnedDates()
+            savePinnedIDs()
             guard let id = target.id else { return }
             manager.removeData(id: id) {
                 tableView.deleteRows(at: [indexPath], with: .automatic)
@@ -311,7 +314,7 @@ extension DdayViewController: UITableViewDelegate, UITableViewDataSource {
                     tableView.insertRows(at: [IndexPath(row: self.pinnedData.count - 1, section: Section.pinned.rawValue)], with: .automatic)
                 }
             }
-            self.savePinnedDates()
+            self.savePinnedIDs()
             completion(true)
         }
         action.image = image

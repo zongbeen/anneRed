@@ -180,9 +180,6 @@ class DatePickerViewController: UIViewController {
             return nil
         }()
 
-        if let ddayVC = ddayVC, let originalDate = originalDate, let newDate = selectedDate {
-            ddayVC.updateStoredPinnedDate(from: originalDate, to: newDate)
-        }
         ddayVC?.reloadAllData()
         self.dismiss(animated: true)
     }
