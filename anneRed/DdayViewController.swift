@@ -48,6 +48,16 @@ class DdayViewController: UIViewController {
             name: .NSCalendarDayChanged,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reduceMotionChanged),
+            name: UIAccessibility.reduceMotionStatusDidChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func reduceMotionChanged() {
+        applySnapshot(animated: false)
     }
 
     deinit {

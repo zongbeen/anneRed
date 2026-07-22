@@ -120,7 +120,7 @@
         <scene sceneID="MaF-UB-sVu">
             <objects>
                 <navigationController storyboardIdentifier="DdayNavigationViewController" automaticallyAdjustsScrollViewInsets="NO" id="sjc-SA-Ekm" customClass="DdayNavigationViewController" customModule="DdayApp" customModuleProvider="target" sceneMemberID="viewController">
-                    <tabBarItem key="tabBarItem" title="Item 1" image="globe" catalog="system" id="AFa-Oe-CM9"/>
+                    <tabBarItem key="tabBarItem" title="기록" image="globe" catalog="system" id="AFa-Oe-CM9"/>
                     <toolbarItems/>
                     <navigationBar key="navigationBar" contentMode="scaleToFill" id="O3M-U8-KWR">
                         <rect key="frame" x="0.0" y="118" width="393" height="54"/>

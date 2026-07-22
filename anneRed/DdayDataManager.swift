@@ -56,7 +56,7 @@ public class DdayDataManager {
             }
             data = fetchedData
         } catch {
-            print("error")
+            // fetch 실패 시 빈 배열 반환
         }
         return data
     }
@@ -86,7 +86,7 @@ public class DdayDataManager {
             do {
                 try context.save()
             } catch {
-                print("error saving updated data: \(error)")
+                // 저장 실패는 무시하고 진행
             }
         }
         completion()
