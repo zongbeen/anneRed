@@ -129,11 +129,10 @@ class DatePickerViewController: UIViewController {
     }
 
     private func updateCalcResultFooter() {
-        // footer만 직접 갱신해 입력 포커스를 유지한다
+        // 셀을 리로드하지 않고 footer 텍스트만 다시 질의하게 해 입력 포커스를 유지한다.
+        // performBatchUpdates(nil)은 header/footer를 재계산하되 셀은 건드리지 않는다.
         UIView.performWithoutAnimation {
-            let footer = self.tableView.footerView(forSection: 1)
-            footer?.textLabel?.text = self.calcResultText
-            footer?.textLabel?.setNeedsLayout()
+            self.tableView.performBatchUpdates(nil)
         }
     }
 
