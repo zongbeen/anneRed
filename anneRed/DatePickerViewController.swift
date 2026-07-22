@@ -7,10 +7,15 @@
 
 import UIKit
 
+protocol DatePickerViewControllerDelegate: AnyObject {
+    func datePickerDidFinish()
+}
+
 class DatePickerViewController: UIViewController {
     @IBOutlet weak var datePicker: UIDatePicker!
     @IBOutlet weak var tableView: UITableView!
 
+    weak var delegate: DatePickerViewControllerDelegate?
     let manager = DdayDataManager.shared
     var data: DdayData? {
         didSet {
@@ -152,7 +157,7 @@ class DatePickerViewController: UIViewController {
             newData?.title = titleText
             newData?.selectedDate = selectedDate
             manager.updateData(targetId: originalDate, newData: newData!) {
-                self.dismissAndReload(originalDate: originalDate)
+                self.dismissAndReload()
             }
         } else {
             manager.saveData(title: titleText.isEmpty ? "empty" : titleText, dday: dday!, selectedDate: selectedDate) {
@@ -161,27 +166,9 @@ class DatePickerViewController: UIViewController {
         }
     }
 
-    private func dismissAndReload(originalDate: Date? = nil) {
-        let presentingVC = self.presentingViewController
-
-        let ddayVC: DdayViewController? = {
-            if let vc = presentingVC as? DdayViewController {
-                return vc
-            }
-            if let navVC = presentingVC as? UINavigationController,
-               let vc = navVC.viewControllers.first as? DdayViewController {
-                return vc
-            }
-            if let tabVC = presentingVC as? UITabBarController,
-               let navVC = tabVC.viewControllers?.first as? DdayNavigationViewController,
-               let vc = navVC.viewControllers.first as? DdayViewController {
-                return vc
-            }
-            return nil
-        }()
-
-        ddayVC?.reloadAllData()
-        self.dismiss(animated: true)
+    private func dismissAndReload() {
+        delegate?.datePickerDidFinish()
+        dismiss(animated: true)
     }
 
     @IBAction func datePickerValueChanged(_ sender: UIDatePicker) {
