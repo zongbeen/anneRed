@@ -267,7 +267,8 @@ extension DdayViewController: UITableViewDelegate, UITableViewDataSource {
                 unpinnedData.remove(at: indexPath.row)
             }
             savePinnedDates()
-            manager.removeData(deleteTarget: target) {
+            guard let id = target.id else { return }
+            manager.removeData(id: id) {
                 tableView.deleteRows(at: [indexPath], with: .automatic)
             }
         }
