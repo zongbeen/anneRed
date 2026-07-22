@@ -23,7 +23,7 @@ class DdayViewController: UIViewController {
     private var pinnedData: [DdayData] = []
     private var unpinnedData: [DdayData] = []
     private var itemsByID: [UUID: DdayData] = [:]
-    private var dataSource: UITableViewDiffableDataSource<Int, UUID>!
+    private var dataSource: DdayDiffableDataSource!
 
     private enum Section: Int {
         case pinned = 0, normal = 1
@@ -90,12 +90,14 @@ class DdayViewController: UIViewController {
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 90
 
-        dataSource = UITableViewDiffableDataSource<Int, UUID>(tableView: tableView) { [weak self] tableView, indexPath, id in
+        dataSource = DdayDiffableDataSource(tableView: tableView) { [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(withIdentifier: DdayCell.reuseID, for: indexPath) as! DdayCell
             if let data = self?.itemsByID[id] { cell.configure(with: data) }
             return cell
         }
         dataSource.defaultRowAnimation = .fade
+        // 편집 모드의 빨간 삭제 버튼 → deleteItem 으로 위임
+        dataSource.onDelete = { [weak self] id in self?.deleteItem(id: id) }
         tableView.delegate = self
     }
 
@@ -163,15 +165,22 @@ class DdayViewController: UIViewController {
         saveWidgetData()
 
         itemsByID = Dictionary(uniqueKeysWithValues: all.compactMap { d in d.id.map { ($0, d) } })
-        applySnapshot(animated: false)
+        applySnapshot(animated: false, reconfigure: true)
     }
 
-    private func applySnapshot(animated: Bool) {
+    /// - Parameter reconfigure: 식별자는 그대로여도 내용(제목·날짜·D-day)이 바뀌었을 수 있는
+    ///   경우(재조회·수정) true. diffable은 식별자가 같으면 셀을 갱신하지 않으므로 강제 재구성한다.
+    private func applySnapshot(animated: Bool, reconfigure: Bool = false) {
         var snapshot = NSDiffableDataSourceSnapshot<Int, UUID>()
         snapshot.appendSections([Section.pinned.rawValue, Section.normal.rawValue])
         snapshot.appendItems(pinnedData.compactMap { $0.id }, toSection: Section.pinned.rawValue)
         snapshot.appendItems(unpinnedData.compactMap { $0.id }, toSection: Section.normal.rawValue)
         dataSource.apply(snapshot, animatingDifferences: animated && !Motion.reduce)
+
+        guard reconfigure else { return }
+        var refreshed = dataSource.snapshot()
+        refreshed.reconfigureItems(refreshed.itemIdentifiers)
+        dataSource.apply(refreshed, animatingDifferences: false)
     }
 
     @objc func leftBarButtonTapped() {
@@ -238,11 +247,22 @@ extension DdayViewController: UITableViewDelegate {
         return UIView()
     }
 
-    func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
-        guard editingStyle == .delete, let id = dataSource.itemIdentifier(for: indexPath) else { return }
-        let isPinned = indexPath.section == Section.pinned.rawValue
-        if isPinned { pinnedData.removeAll { $0.id == id } }
-        else { unpinnedData.removeAll { $0.id == id } }
+    /// 트레일링 스와이프 삭제 — diffable 에서는 commit(forRowAt:)이 delegate로 오지 않으므로
+    /// 스와이프 액션으로 직접 제공한다. 편집 모드의 빨간 삭제 버튼은 DdayDiffableDataSource가 담당.
+    func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        Haptics.prepareImpact()
+        let action = UIContextualAction(style: .destructive, title: "삭제") { [weak self] _, _, completion in
+            self?.deleteItem(id: id)
+            completion(true)
+        }
+        action.image = UIImage(systemName: "trash.fill")
+        return UISwipeActionsConfiguration(actions: [action])
+    }
+
+    func deleteItem(id: UUID) {
+        pinnedData.removeAll { $0.id == id }
+        unpinnedData.removeAll { $0.id == id }
         savePinnedIDs()
         Haptics.delete()
         manager.removeData(id: id) { [weak self] in
@@ -313,4 +333,19 @@ extension DdayViewController: UITableViewDelegate {
 
 extension DdayViewController: DatePickerViewControllerDelegate {
     func datePickerDidFinish() { reloadAllData() }
+}
+
+/// 편집 모드의 빨간 삭제 버튼을 지원하는 diffable data source.
+/// diffable은 기본적으로 commit(forRowAt:)을 delegate로 넘기지 않으므로 여기서 처리한다.
+final class DdayDiffableDataSource: UITableViewDiffableDataSource<Int, UUID> {
+    var onDelete: ((UUID) -> Void)?
+
+    override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
+        return true
+    }
+
+    override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
+        guard editingStyle == .delete, let id = itemIdentifier(for: indexPath) else { return }
+        onDelete?(id)
+    }
 }

@@ -112,25 +112,21 @@ class DatePickerViewController: UIViewController {
     }
 
     func calculateDay() {
-        guard let days = Int(calcInputText) else {
-            calcResultText = ""
-            updateCalcResultFooter()
-            return
-        }
-        let calendar = Calendar.current
-        if let resultDate = calendar.date(byAdding: .day, value: days, to: datePicker.date) {
+        if let days = Int(calcInputText),
+           let resultDate = Calendar.current.date(byAdding: .day, value: days, to: datePicker.date) {
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "yyyy년 MM월 dd일"
             calcResultText = dateFormatter.string(from: resultDate)
         } else {
-            calcResultText = "error"
+            calcResultText = ""
         }
-        updateCalcResultFooter()
+        updateCalcResultCell()
     }
 
-    private func updateCalcResultFooter() {
-        // 셀을 리로드하지 않고 footer 텍스트만 다시 질의하게 해 입력 포커스를 유지한다.
-        // performBatchUpdates(nil)은 header/footer를 재계산하되 셀은 건드리지 않는다.
+    private func updateCalcResultCell() {
+        // 계산 셀에 결과를 직접 써서 입력 포커스를 유지하고, 높이 변화는 리로드 없이 반영한다.
+        guard let cell = tableView.cellForRow(at: IndexPath(row: 0, section: 1)) as? InputCell else { return }
+        cell.setResult(calcResultText)
         UIView.performWithoutAnimation {
             self.tableView.performBatchUpdates(nil)
         }
@@ -182,10 +178,6 @@ extension DatePickerViewController: UITableViewDelegate, UITableViewDataSource {
 
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         return section == 1 ? "선택한 날짜로부터 계산하기" : nil
-    }
-
-    func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        return section == 1 ? (calcResultText.isEmpty ? nil : calcResultText) : nil
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {

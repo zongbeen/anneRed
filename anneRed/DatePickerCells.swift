@@ -28,29 +28,46 @@ final class InputCell: UITableViewCell {
     static let reuseID = "InputCell"
     private let titleLabel = UILabel()
     let textField = UITextField()
+    private let resultLabel = UILabel()
     var onChange: ((String) -> Void)?
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: .default, reuseIdentifier: reuseIdentifier)
         selectionStyle = .none
+
         titleLabel.font = .preferredFont(forTextStyle: .body)
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.setContentHuggingPriority(.required, for: .horizontal)
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
         textField.textAlignment = .right
         textField.clearButtonMode = .whileEditing
         textField.adjustsFontForContentSizeCategory = true
         textField.font = .preferredFont(forTextStyle: .body)
-        textField.translatesAutoresizingMaskIntoConstraints = false
         textField.addTarget(self, action: #selector(changed), for: .editingChanged)
-        contentView.addSubview(titleLabel)
-        contentView.addSubview(textField)
+
+        resultLabel.font = .preferredFont(forTextStyle: .footnote)
+        resultLabel.adjustsFontForContentSizeCategory = true
+        resultLabel.textColor = .secondaryLabel
+        resultLabel.textAlignment = .right
+        resultLabel.isHidden = true
+
+        let topRow = UIStackView(arrangedSubviews: [titleLabel, textField])
+        topRow.axis = .horizontal
+        topRow.spacing = 12
+        topRow.alignment = .firstBaseline
+
+        let vStack = UIStackView(arrangedSubviews: [topRow, resultLabel])
+        vStack.axis = .vertical
+        vStack.spacing = 2
+        vStack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(vStack)
+
         NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            textField.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 12),
-            textField.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
-            textField.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            vStack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
+            vStack.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            vStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 11),
+            vStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -11),
             contentView.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
         ])
     }
@@ -65,9 +82,17 @@ final class InputCell: UITableViewCell {
         textField.keyboardType = keyboard
     }
 
+    /// 계산 결과를 셀 내부에 직접 표시한다(리로드 없이 → 입력 포커스 유지).
+    func setResult(_ text: String?) {
+        let value = text ?? ""
+        resultLabel.text = value
+        resultLabel.isHidden = value.isEmpty
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
         onChange = nil
         textField.keyboardType = .default
+        setResult(nil)
     }
 }
