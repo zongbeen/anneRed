@@ -8,7 +8,4 @@
 import UIKit
 
 class DdayNavigationViewController: UINavigationController {
-    override func viewDidLoad() {
-        super.viewDidLoad()
-    }
 }

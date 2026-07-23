@@ -8,7 +8,4 @@
 import UIKit
 
 class DatePickerNavigationViewController: UINavigationController {
-    override func viewDidLoad() {
-        super.viewDidLoad()
-    }
 }

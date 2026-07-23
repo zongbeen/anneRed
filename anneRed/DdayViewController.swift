@@ -14,20 +14,23 @@ class DdayViewController: UIViewController {
     var isEditingMode = false
 
     private let maxPinnedCount = 2
-    private let pinnedDatesKey = "pinnedDates"
+    private let pinnedIDsKey = "pinnedIDs"
+    private let legacyPinnedDatesKey = "pinnedDates"
 
     static let appGroupID = "group.com.zongbeen.anneRed"
     static var sharedDefaults: UserDefaults { UserDefaults(suiteName: appGroupID) ?? .standard }
 
     private var pinnedData: [DdayData] = []
     private var unpinnedData: [DdayData] = []
+    private var itemsByID: [UUID: DdayData] = [:]
+    private var dataSource: DdayDiffableDataSource!
 
     private enum Section: Int {
         case pinned = 0, normal = 1
     }
 
     lazy var leftBarButton: UIBarButtonItem = {
-        UIBarButtonItem(title: "Edit", style: .plain, target: self, action: #selector(leftBarButtonTapped))
+        UIBarButtonItem(title: "편집", style: .plain, target: self, action: #selector(leftBarButtonTapped))
     }()
 
     lazy var rightBarButton: UIBarButtonItem = {
@@ -45,10 +48,20 @@ class DdayViewController: UIViewController {
             name: .NSCalendarDayChanged,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reduceMotionChanged),
+            name: UIAccessibility.reduceMotionStatusDidChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func reduceMotionChanged() {
+        applySnapshot(animated: false)
     }
 
     deinit {
-        NotificationCenter.default.removeObserver(self, name: .NSCalendarDayChanged, object: nil)
+        NotificationCenter.default.removeObserver(self)
     }
 
     @objc private func handleDayChanged() {
@@ -62,17 +75,9 @@ class DdayViewController: UIViewController {
         reloadAllData()
     }
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-    }
-
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-    }
-
     private func setupNavigationBar() {
         self.navigationController?.navigationBar.prefersLargeTitles = true
-        self.title = "Record"
+        self.title = "기록"
         leftBarButton.tintColor = .systemOrange
         rightBarButton.tintColor = .systemOrange
         self.navigationItem.leftBarButtonItem = leftBarButton
@@ -80,37 +85,58 @@ class DdayViewController: UIViewController {
     }
 
     private func setupTableView() {
+        tableView.register(DdayCell.self, forCellReuseIdentifier: DdayCell.reuseID)
+        tableView.sectionHeaderTopPadding = 0
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = 90
+
+        dataSource = DdayDiffableDataSource(tableView: tableView) { [weak self] tableView, indexPath, id in
+            let cell = tableView.dequeueReusableCell(withIdentifier: DdayCell.reuseID, for: indexPath) as! DdayCell
+            if let data = self?.itemsByID[id] { cell.configure(with: data) }
+            return cell
+        }
+        dataSource.defaultRowAnimation = .fade
+        // 편집 모드의 빨간 삭제 버튼 → deleteItem 으로 위임
+        dataSource.onDelete = { [weak self] id in self?.deleteItem(id: id) }
         tableView.delegate = self
-        tableView.dataSource = self
-        tableView.register(UINib(nibName: "TableViewCell", bundle: nil), forCellReuseIdentifier: "TableViewCell")
-        if #available(iOS 15.0, *) {
-            tableView.sectionHeaderTopPadding = 0
-        }
     }
 
-    private func loadPinnedDates() -> [String] {
+    private func loadPinnedIDs() -> [UUID] {
         let shared = DdayViewController.sharedDefaults
-        if let migrated = UserDefaults.standard.stringArray(forKey: pinnedDatesKey) {
-            shared.set(migrated, forKey: pinnedDatesKey)
-            UserDefaults.standard.removeObject(forKey: pinnedDatesKey)
+
+        // UserDefaults.standard → App Group 1회 이관 (기존 마이그레이션 유지)
+        if let migrated = UserDefaults.standard.stringArray(forKey: legacyPinnedDatesKey) {
+            shared.set(migrated, forKey: legacyPinnedDatesKey)
+            UserDefaults.standard.removeObject(forKey: legacyPinnedDatesKey)
         }
-        return shared.stringArray(forKey: pinnedDatesKey) ?? []
+
+        // 이미 UUID 배열이 있으면 그대로
+        if let ids = shared.stringArray(forKey: pinnedIDsKey) {
+            return ids.compactMap { UUID(uuidString: $0) }
+        }
+
+        // 레거시 ISO 날짜 배열 → UUID 1회 변환
+        guard let legacy = shared.stringArray(forKey: legacyPinnedDatesKey) else { return [] }
+        let formatter = ISO8601DateFormatter()
+        let dates = legacy.compactMap { formatter.date(from: $0) }
+        let all = manager.getSavedData()
+        let ids: [UUID] = dates.compactMap { date in
+            all.first { Calendar.current.isDate($0.selectedDate ?? .distantPast, inSameDayAs: date) }?.id
+        }
+        shared.set(ids.map { $0.uuidString }, forKey: pinnedIDsKey)
+        shared.removeObject(forKey: legacyPinnedDatesKey)
+        return ids
     }
 
-    private func savePinnedDates() {
-        let formatter = ISO8601DateFormatter()
-        let dates = pinnedData.compactMap { $0.selectedDate }.map { formatter.string(from: $0) }
-        DdayViewController.sharedDefaults.set(dates, forKey: pinnedDatesKey)
+    private func savePinnedIDs() {
+        let ids = pinnedData.compactMap { $0.id?.uuidString }
+        DdayViewController.sharedDefaults.set(ids, forKey: pinnedIDsKey)
         saveWidgetData()
     }
 
     private func saveWidgetData() {
         let shared = DdayViewController.sharedDefaults
-        let isAppGroup = UserDefaults(suiteName: DdayViewController.appGroupID) != nil
-        print("🔍 App Group 유효: \(isAppGroup), pinnedData 수: \(pinnedData.count)")
-
         guard let first = pinnedData.first else {
-            print("⚠️ pinnedData 비어있음 - widgetData 삭제")
             shared.removeObject(forKey: "widgetData")
             WidgetCenter.shared.reloadAllTimelines()
             return
@@ -125,112 +151,87 @@ class DdayViewController: UIViewController {
             "date": dateString
         ]
         shared.set(dict, forKey: "widgetData")
-        print("✅ widgetData 저장: \(dict)")
         WidgetCenter.shared.reloadAllTimelines()
-    }
-
-    private func calculateDday(selectedDate: Date) -> String {
-        let currentDateOnly = Calendar.current.dateComponents([.year, .month, .day], from: Date())
-        let selectedDateOnly = Calendar.current.dateComponents([.year, .month, .day], from: selectedDate)
-        let daysLeft = Calendar.current.dateComponents([.day], from: currentDateOnly, to: selectedDateOnly).day ?? 0
-        if daysLeft > 0 { return "D-\(daysLeft)" }
-        else if daysLeft == 0 { return "D-Day" }
-        else { return "D+\(abs(daysLeft))" }
-    }
-
-    func updateStoredPinnedDate(from originalDate: Date, to newDate: Date) {
-        let formatter = ISO8601DateFormatter()
-        var savedDates = loadPinnedDates()
-        guard !savedDates.isEmpty else { return }
-        let pinnedDates = savedDates.compactMap { formatter.date(from: $0) }
-        if let idx = pinnedDates.firstIndex(where: { Calendar.current.isDate($0, inSameDayAs: originalDate) }) {
-            savedDates[idx] = formatter.string(from: newDate)
-            DdayViewController.sharedDefaults.set(savedDates, forKey: pinnedDatesKey)
-        }
     }
 
     func reloadAllData() {
         let all = manager.getSavedData()
-        let formatter = ISO8601DateFormatter()
-        let savedDates = loadPinnedDates()
-        let pinnedDates = savedDates.compactMap { formatter.date(from: $0) }
+        let pinnedIDs = loadPinnedIDs()
 
         // 저장된 순서 유지
-        pinnedData = pinnedDates.compactMap { date in
-            all.first { Calendar.current.isDate($0.selectedDate ?? .distantPast, inSameDayAs: date) }
-        }
-        let pinnedSet = Set(pinnedData.compactMap { $0.selectedDate })
-        unpinnedData = all.filter { $0.selectedDate.map { !pinnedSet.contains($0) } ?? true }
+        pinnedData = pinnedIDs.compactMap { id in all.first { $0.id == id } }
+        let pinnedSet = Set(pinnedData.compactMap { $0.id })
+        unpinnedData = all.filter { $0.id.map { !pinnedSet.contains($0) } ?? true }
         saveWidgetData()
-        tableView.reloadData()
+
+        itemsByID = Dictionary(uniqueKeysWithValues: all.compactMap { d in d.id.map { ($0, d) } })
+        applySnapshot(animated: false, reconfigure: true)
     }
 
-    private func item(at indexPath: IndexPath) -> DdayData {
-        return indexPath.section == Section.pinned.rawValue ? pinnedData[indexPath.row] : unpinnedData[indexPath.row]
+    /// - Parameter reconfigure: 식별자는 그대로여도 내용(제목·날짜·D-day)이 바뀌었을 수 있는
+    ///   경우(재조회·수정) true. diffable은 식별자가 같으면 셀을 갱신하지 않으므로 강제 재구성한다.
+    private func applySnapshot(animated: Bool, reconfigure: Bool = false) {
+        var snapshot = NSDiffableDataSourceSnapshot<Int, UUID>()
+        snapshot.appendSections([Section.pinned.rawValue, Section.normal.rawValue])
+        snapshot.appendItems(pinnedData.compactMap { $0.id }, toSection: Section.pinned.rawValue)
+        snapshot.appendItems(unpinnedData.compactMap { $0.id }, toSection: Section.normal.rawValue)
+        dataSource.apply(snapshot, animatingDifferences: animated && !Motion.reduce)
+
+        guard reconfigure else { return }
+        var refreshed = dataSource.snapshot()
+        refreshed.reconfigureItems(refreshed.itemIdentifiers)
+        dataSource.apply(refreshed, animatingDifferences: false)
     }
 
     @objc func leftBarButtonTapped() {
         isEditingMode = !isEditingMode
-        leftBarButton.title = isEditingMode ? "Done" : "Edit"
+        leftBarButton.title = isEditingMode ? "완료" : "편집"
         setEditing(!tableView.isEditing, animated: true)
     }
 
     @objc func rightBarButtonTapped() {
         let datePickerViewController = self.storyboard?.instantiateViewController(identifier: "DatePickerViewController") as! DatePickerViewController
+        datePickerViewController.delegate = self
         let navigationController = UINavigationController(rootViewController: datePickerViewController)
         self.present(navigationController, animated: true, completion: nil)
     }
 
     override func setEditing(_ editing: Bool, animated: Bool) {
         super.setEditing(editing, animated: animated)
-        tableView.setEditing(editing, animated: true)
-        tableView.visibleCells.compactMap { $0 as? TableViewCell }.forEach { cell in
-            if editing {
-                cell.ddayLabel.isHidden = true
-            } else {
-                UIView.transition(with: cell.ddayLabel, duration: 0.5, options: .transitionCrossDissolve) {
-                    cell.ddayLabel.isHidden = false
-                }
-            }
-        }
+        tableView.setEditing(editing, animated: animated)
     }
 }
 
-extension DdayViewController: UITableViewDelegate, UITableViewDataSource {
-
-    func numberOfSections(in tableView: UITableView) -> Int {
-        return 2
-    }
-
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return section == Section.pinned.rawValue ? pinnedData.count : unpinnedData.count
-    }
+extension DdayViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
         let container = UIView()
-
         let label = UILabel()
-        label.text = section == Section.pinned.rawValue ? "Pinned" : "Other"
-        label.font = .boldSystemFont(ofSize: 18)
-        label.textColor = .white
+        label.text = section == Section.pinned.rawValue ? "고정" : "나머지"
+        label.font = UIFontMetrics(forTextStyle: .headline).scaledFont(for: .boldSystemFont(ofSize: 18))
+        label.adjustsFontForContentSizeCategory = true
+        label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(label)
 
-        let separator = UIView()
-        separator.backgroundColor = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(separator)
-
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
-            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
-            label.bottomAnchor.constraint(equalTo: separator.topAnchor, constant: -4),
-            separator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            separator.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            separator.heightAnchor.constraint(equalToConstant: 0.5)
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
 
+        if section == Section.pinned.rawValue {
+            let count = UILabel()
+            count.text = "\(pinnedData.count)/\(maxPinnedCount)"
+            count.font = UIFontMetrics(forTextStyle: .footnote).scaledFont(for: .systemFont(ofSize: 13, weight: .regular))
+            count.adjustsFontForContentSizeCategory = true
+            count.textColor = .tertiaryLabel
+            count.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(count)
+            NSLayoutConstraint.activate([
+                count.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+                count.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            ])
+        }
         return container
     }
 
@@ -246,30 +247,27 @@ extension DdayViewController: UITableViewDelegate, UITableViewDataSource {
         return UIView()
     }
 
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        guard let cell = tableView.dequeueReusableCell(withIdentifier: "TableViewCell", for: indexPath) as? TableViewCell else {
-            return UITableViewCell()
+    /// 트레일링 스와이프 삭제 — diffable 에서는 commit(forRowAt:)이 delegate로 오지 않으므로
+    /// 스와이프 액션으로 직접 제공한다. 편집 모드의 빨간 삭제 버튼은 DdayDiffableDataSource가 담당.
+    func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        Haptics.prepareImpact()
+        let action = UIContextualAction(style: .destructive, title: "삭제") { [weak self] _, _, completion in
+            self?.deleteItem(id: id)
+            completion(true)
         }
-        cell.data = item(at: indexPath)
-        return cell
+        action.image = UIImage(systemName: "trash.fill")
+        return UISwipeActionsConfiguration(actions: [action])
     }
 
-    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        return 90
-    }
-
-    func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
-        if editingStyle == .delete {
-            let target = item(at: indexPath)
-            if indexPath.section == Section.pinned.rawValue {
-                pinnedData.remove(at: indexPath.row)
-            } else {
-                unpinnedData.remove(at: indexPath.row)
-            }
-            savePinnedDates()
-            manager.removeData(deleteTarget: target) {
-                tableView.deleteRows(at: [indexPath], with: .automatic)
-            }
+    func deleteItem(id: UUID) {
+        pinnedData.removeAll { $0.id == id }
+        unpinnedData.removeAll { $0.id == id }
+        savePinnedIDs()
+        Haptics.delete()
+        manager.removeData(id: id) { [weak self] in
+            self?.itemsByID[id] = nil
+            self?.applySnapshot(animated: true)
         }
     }
 
@@ -280,57 +278,74 @@ extension DdayViewController: UITableViewDelegate, UITableViewDataSource {
 
     func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         let isPinned = indexPath.section == Section.pinned.rawValue
+        Haptics.prepareImpact()
+        Haptics.prepareNotification()
 
         if !isPinned && pinnedData.count >= maxPinnedCount {
-            // 이미 2개 고정됨 → 고정 버튼 비활성
-            let action = UIContextualAction(style: .normal, title: "최대 2개") { _, _, completion in
+            let action = UIContextualAction(style: .normal, title: "고정 해제 후 가능") { _, _, completion in
+                Haptics.limitWarning()
                 completion(false)
             }
+            action.image = UIImage(systemName: "pin.slash")
             action.backgroundColor = .systemGray
             return UISwipeActionsConfiguration(actions: [action])
         }
 
         let title = isPinned ? "고정 해제" : "고정"
-        let image = UIImage(systemName: isPinned ? "pin.slash.fill" : "pin.fill")
-
         let action = UIContextualAction(style: .normal, title: title) { [weak self] _, _, completion in
-            guard let self else { return }
-            let target = self.item(at: indexPath)
-
-            tableView.performBatchUpdates {
-                if isPinned {
-                    self.pinnedData.remove(at: indexPath.row)
-                    self.unpinnedData.insert(target, at: 0)
-                    tableView.deleteRows(at: [indexPath], with: .automatic)
-                    tableView.insertRows(at: [IndexPath(row: 0, section: Section.normal.rawValue)], with: .automatic)
-                } else {
-                    self.unpinnedData.remove(at: indexPath.row)
-                    self.pinnedData.append(target)
-                    tableView.deleteRows(at: [indexPath], with: .automatic)
-                    tableView.insertRows(at: [IndexPath(row: self.pinnedData.count - 1, section: Section.pinned.rawValue)], with: .automatic)
-                }
+            guard let self, let id = self.dataSource.itemIdentifier(for: indexPath),
+                  let target = self.itemsByID[id] else { completion(false); return }
+            if isPinned {
+                self.pinnedData.removeAll { $0.id == id }
+                self.unpinnedData.insert(target, at: 0)
+            } else {
+                self.unpinnedData.removeAll { $0.id == id }
+                self.pinnedData.append(target)
             }
-            self.savePinnedDates()
+            self.savePinnedIDs()
+            Haptics.pinToggle()
+            self.applySnapshot(animated: !Motion.reduce)
             completion(true)
         }
-        action.image = image
+        action.image = UIImage(systemName: isPinned ? "pin.slash.fill" : "pin.fill")
         action.backgroundColor = .systemOrange
-
         return UISwipeActionsConfiguration(actions: [action])
     }
 
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
-        if segue.identifier == "DdayViewController", let indexPath = tableView.indexPathForSelectedRow {
+        if segue.identifier == "DdayViewController", let indexPath = tableView.indexPathForSelectedRow,
+           let id = dataSource.itemIdentifier(for: indexPath), let selected = itemsByID[id] {
             guard let navigationController = segue.destination as? DatePickerNavigationViewController,
                   let viewController = navigationController.viewControllers.first as? DatePickerViewController else {
                 return
             }
-            let selected = item(at: indexPath)
             viewController.data = selected
+            viewController.delegate = self
             viewController.loadViewIfNeeded()
-            viewController.datePicker.setDate(selected.selectedDate!, animated: false)
+            if let date = selected.selectedDate {
+                viewController.datePicker.setDate(date, animated: false)
+            }
             viewController.updateDdayLabel()
             viewController.tableView.reloadData()
         }
+    }
+}
+
+extension DdayViewController: DatePickerViewControllerDelegate {
+    func datePickerDidFinish() { reloadAllData() }
+}
+
+/// 편집 모드의 빨간 삭제 버튼을 지원하는 diffable data source.
+/// diffable은 기본적으로 commit(forRowAt:)을 delegate로 넘기지 않으므로 여기서 처리한다.
+final class DdayDiffableDataSource: UITableViewDiffableDataSource<Int, UUID> {
+    var onDelete: ((UUID) -> Void)?
+
+    override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
+        return true
+    }
+
+    override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
+        guard editingStyle == .delete, let id = itemIdentifier(for: indexPath) else { return }
+        onDelete?(id)
     }
 }

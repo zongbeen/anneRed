@@ -7,10 +7,15 @@
 
 import UIKit
 
+protocol DatePickerViewControllerDelegate: AnyObject {
+    func datePickerDidFinish()
+}
+
 class DatePickerViewController: UIViewController {
     @IBOutlet weak var datePicker: UIDatePicker!
     @IBOutlet weak var tableView: UITableView!
 
+    weak var delegate: DatePickerViewControllerDelegate?
     let manager = DdayDataManager.shared
     var data: DdayData? {
         didSet {
@@ -24,8 +29,8 @@ class DatePickerViewController: UIViewController {
 
     private var ddayResultText: String = ""
     private var titleText: String = ""
-    private var caculInputText: String = ""
-    private var caculResultText: String = ""
+    private var calcInputText: String = ""
+    private var calcResultText: String = ""
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -41,10 +46,10 @@ class DatePickerViewController: UIViewController {
     }
 
     private func setupNavigationBar() {
-        self.title = "Add List"
+        self.title = (data == nil) ? "새 D-Day" : "편집"
 
-        let leftBarButton = UIBarButtonItem(title: "Cancel", style: .plain, target: self, action: #selector(leftBarButtonTapped))
-        let rightBarButton = UIBarButtonItem(title: "Save", style: .plain, target: self, action: #selector(rightBarButtonTapped))
+        let leftBarButton = UIBarButtonItem(title: "취소", style: .plain, target: self, action: #selector(leftBarButtonTapped))
+        let rightBarButton = UIBarButtonItem(title: "저장", style: .plain, target: self, action: #selector(rightBarButtonTapped))
 
         leftBarButton.tintColor = .systemOrange
         rightBarButton.tintColor = .systemOrange
@@ -57,6 +62,8 @@ class DatePickerViewController: UIViewController {
         tableView.delegate = self
         tableView.dataSource = self
         tableView.isScrollEnabled = true
+        tableView.register(ValueCell.self, forCellReuseIdentifier: ValueCell.reuseID)
+        tableView.register(InputCell.self, forCellReuseIdentifier: InputCell.reuseID)
 
         datePicker.translatesAutoresizingMaskIntoConstraints = true
         datePicker.frame = CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 216)
@@ -95,48 +102,34 @@ class DatePickerViewController: UIViewController {
     }
 
     func updateDdayLabel() {
-        selectedDate = datePicker.date
-        let currentDate = Date()
-        let currentDateOnly = Calendar.current.dateComponents([.year, .month, .day], from: currentDate)
-        let selectedDateOnly = Calendar.current.dateComponents([.year, .month, .day], from: selectedDate!)
-        daysLeft = Calendar.current.dateComponents([.day], from: currentDateOnly, to: selectedDateOnly).day ?? 0
-
-        if daysLeft! > 0 {
-            dday = "D-\(daysLeft ?? 0)"
-            ddayResultText = "D-\(daysLeft ?? 0)"
-        } else if daysLeft == 0 {
-            dday = "D-Day"
-            ddayResultText = "D-Day"
-        } else {
-            dday = "D+\(abs(daysLeft ?? 0))"
-            ddayResultText = "D+\(abs(daysLeft ?? 0))"
-        }
-
-        if let cell = tableView.cellForRow(at: IndexPath(row: 0, section: 0)) {
-            cell.detailTextLabel?.text = ddayResultText
-        }
+        let target = datePicker.date
+        selectedDate = target
+        let days = DdayCalculator.days(from: Date(), to: target)
+        daysLeft = days
+        dday = DdayCalculator.text(daysLeft: days)
+        ddayResultText = dday ?? ""
+        tableView.reloadRows(at: [IndexPath(row: 0, section: 0)], with: .none)
     }
 
-    func caculateDay() {
-        guard let days = Int(caculInputText) else {
-            caculResultText = ""
-            updateCaculResultCell()
-            return
-        }
-        let calendar = Calendar.current
-        if let resultDate = calendar.date(byAdding: .day, value: days, to: datePicker.date) {
+    func calculateDay() {
+        if let days = Int(calcInputText),
+           let resultDate = Calendar.current.date(byAdding: .day, value: days, to: datePicker.date) {
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "yyyy년 MM월 dd일"
-            caculResultText = dateFormatter.string(from: resultDate)
+            calcResultText = dateFormatter.string(from: resultDate)
         } else {
-            caculResultText = "error"
+            calcResultText = ""
         }
-        updateCaculResultCell()
+        updateCalcResultCell()
     }
 
-    private func updateCaculResultCell() {
-        guard let cell = tableView.cellForRow(at: IndexPath(row: 0, section: 1)) else { return }
-        (cell.contentView.viewWithTag(3) as? UILabel)?.text = caculResultText
+    private func updateCalcResultCell() {
+        // 계산 셀에 결과를 직접 써서 입력 포커스를 유지하고, 높이 변화는 리로드 없이 반영한다.
+        guard let cell = tableView.cellForRow(at: IndexPath(row: 0, section: 1)) as? InputCell else { return }
+        cell.setResult(calcResultText)
+        UIView.performWithoutAnimation {
+            self.tableView.performBatchUpdates(nil)
+        }
     }
 
     @objc func leftBarButtonTapped() {
@@ -145,62 +138,32 @@ class DatePickerViewController: UIViewController {
 
     @objc func rightBarButtonTapped() {
         updateDdayLabel()
-        if data != nil {
-            let originalDate = data!.selectedDate!  // 수정 전 날짜를 먼저 저장
-            let newData = data
-            newData?.dday = dday
-            newData?.title = titleText
-            newData?.selectedDate = selectedDate
-            manager.updateData(targetId: originalDate, newData: newData!) {
-                self.dismissAndReload(originalDate: originalDate)
+        let finalDday = dday ?? DdayCalculator.text(from: Date(), to: datePicker.date)
+        if let existing = data {
+            existing.dday = finalDday
+            existing.title = titleText
+            existing.selectedDate = selectedDate
+            manager.updateData(targetId: existing.selectedDate ?? Date(), newData: existing) {
+                self.dismissAndReload()
             }
         } else {
-            manager.saveData(title: titleText.isEmpty ? "empty" : titleText, dday: dday!, selectedDate: selectedDate) {
+            manager.saveData(title: titleText.isEmpty ? "empty" : titleText, dday: finalDday, selectedDate: selectedDate) {
+                Haptics.saveSuccess()
                 self.dismissAndReload()
             }
         }
     }
 
-    private func dismissAndReload(originalDate: Date? = nil) {
-        let presentingVC = self.presentingViewController
-
-        let ddayVC: DdayViewController? = {
-            if let vc = presentingVC as? DdayViewController {
-                return vc
-            }
-            if let navVC = presentingVC as? UINavigationController,
-               let vc = navVC.viewControllers.first as? DdayViewController {
-                return vc
-            }
-            if let tabVC = presentingVC as? UITabBarController,
-               let navVC = tabVC.viewControllers?.first as? DdayNavigationViewController,
-               let vc = navVC.viewControllers.first as? DdayViewController {
-                return vc
-            }
-            return nil
-        }()
-
-        if let ddayVC = ddayVC, let originalDate = originalDate, let newDate = selectedDate {
-            ddayVC.updateStoredPinnedDate(from: originalDate, to: newDate)
-        }
-        ddayVC?.reloadAllData()
-        self.dismiss(animated: true)
+    private func dismissAndReload() {
+        delegate?.datePickerDidFinish()
+        dismiss(animated: true)
     }
 
     @IBAction func datePickerValueChanged(_ sender: UIDatePicker) {
         updateDdayLabel()
-        if !caculInputText.isEmpty {
-            caculateDay()
+        if !calcInputText.isEmpty {
+            calculateDay()
         }
-    }
-
-    @objc private func titleTextFieldChanged(_ sender: UITextField) {
-        titleText = sender.text ?? ""
-    }
-
-    @objc private func caculTextFieldChanged(_ sender: UITextField) {
-        caculInputText = sender.text ?? ""
-        caculateDay()
     }
 }
 
@@ -218,75 +181,28 @@ extension DatePickerViewController: UITableViewDelegate, UITableViewDataSource {
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
-        cell.selectionStyle = .none
-
-        if indexPath.section == 0 {
-            switch indexPath.row {
-            case 0:
-                cell.textLabel?.text = "D-Day"
-                cell.detailTextLabel?.text = ddayResultText
-                cell.detailTextLabel?.font = .systemFont(ofSize: 22, weight: .medium)
-
-            case 1:
-                cell.textLabel?.text = "Title"
-                cell.detailTextLabel?.text = nil
-
-                let tf = UITextField()
-                tf.placeholder = "title"
-                tf.textAlignment = .right
-                tf.text = titleText
-                tf.clearButtonMode = .whileEditing
-                tf.translatesAutoresizingMaskIntoConstraints = false
-                tf.addTarget(self, action: #selector(titleTextFieldChanged(_:)), for: .editingChanged)
-                cell.contentView.addSubview(tf)
-                NSLayoutConstraint.activate([
-                    tf.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -16),
-                    tf.centerYAnchor.constraint(equalTo: cell.contentView.centerYAnchor),
-                    tf.widthAnchor.constraint(equalToConstant: 200)
-                ])
-
-            default:
-                break
-            }
-        } else {
-            cell.textLabel?.text = "Calculate"
-            cell.detailTextLabel?.text = nil
-
-            let tf = UITextField()
-            tf.placeholder = "days"
-            tf.textAlignment = .right
-            tf.keyboardType = .numberPad
-            tf.text = caculInputText
-            tf.clearButtonMode = .whileEditing
-            tf.translatesAutoresizingMaskIntoConstraints = false
-            tf.addTarget(self, action: #selector(caculTextFieldChanged(_:)), for: .editingChanged)
-
-            let resultLabel = UILabel()
-            resultLabel.tag = 3
-            resultLabel.text = caculResultText
-            resultLabel.textAlignment = .right
-            resultLabel.font = .systemFont(ofSize: 13)
-            resultLabel.textColor = .systemGray
-            resultLabel.adjustsFontSizeToFitWidth = true
-            resultLabel.translatesAutoresizingMaskIntoConstraints = false
-
-            cell.contentView.addSubview(tf)
-            cell.contentView.addSubview(resultLabel)
-            NSLayoutConstraint.activate([
-                tf.trailingAnchor.constraint(equalTo: cell.contentView.centerXAnchor, constant: 10),
-                tf.centerYAnchor.constraint(equalTo: cell.contentView.centerYAnchor),
-                tf.widthAnchor.constraint(equalToConstant: 80),
-                resultLabel.leadingAnchor.constraint(equalTo: cell.contentView.centerXAnchor, constant: 16),
-                resultLabel.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -16),
-                resultLabel.centerYAnchor.constraint(equalTo: cell.contentView.centerYAnchor)
-            ])
+        if indexPath.section == 0 && indexPath.row == 0 {
+            let cell = tableView.dequeueReusableCell(withIdentifier: ValueCell.reuseID, for: indexPath) as! ValueCell
+            cell.configure(title: "D-Day", value: ddayResultText,
+                           valueFont: .systemFont(ofSize: 22, weight: .medium))
+            return cell
         }
-
+        if indexPath.section == 0 && indexPath.row == 1 {
+            let cell = tableView.dequeueReusableCell(withIdentifier: InputCell.reuseID, for: indexPath) as! InputCell
+            cell.configure(title: "제목", text: titleText, placeholder: "제목")
+            cell.onChange = { [weak self] in self?.titleText = $0 }
+            return cell
+        }
+        let cell = tableView.dequeueReusableCell(withIdentifier: InputCell.reuseID, for: indexPath) as! InputCell
+        cell.configure(title: "일수", text: calcInputText, placeholder: "일수", keyboard: .numberPad)
+        cell.onChange = { [weak self] in
+            self?.calcInputText = $0
+            self?.calculateDay()
+        }
         return cell
     }
 
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        return 50
+        return UITableView.automaticDimension
     }
 }

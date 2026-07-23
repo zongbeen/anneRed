@@ -28,10 +28,11 @@ public class DdayDataManager {
         guard let data = NSManagedObject(entity: entity, insertInto: context) as? DdayData else {
             return
         }
+        data.id = UUID()
         data.dday = dday
         data.title = title
         data.selectedDate = selectedDate
-        
+
         do {
             try context.save()
             completion()
@@ -55,45 +56,23 @@ public class DdayDataManager {
             }
             data = fetchedData
         } catch {
-            print("error")
+            // fetch 실패 시 빈 배열 반환
         }
         return data
     }
     
-    func removeData(deleteTarget: DdayData, completion: @escaping () -> Void){
-        guard let context = context else {
-            print("error")
-            completion()
-            return
-        }
-        guard let targetId = deleteTarget.selectedDate else {
-            completion()
-            return
-        }
-
+    func removeData(id: UUID, completion: @escaping () -> Void) {
+        guard let context = context else { completion(); return }
         let request = NSFetchRequest<NSManagedObject>(entityName: "DdayData")
-        request.predicate = NSPredicate(format: "selectedDate = %@", targetId as CVarArg)
-
-        do{
-            guard let fetchData = try context.fetch(request) as? [DdayData] else {
-                completion()
-                return
-            }
-            guard let data = fetchData.first else {
-                completion()
-                return
-            }
+        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+        do {
+            let fetched = try context.fetch(request) as? [DdayData] ?? []
+            guard let data = fetched.first else { completion(); return }
             context.delete(data)
-
-            do{
-                try context.save()
-                completion()
-
-            }catch{
-                completion()
-            }
-        } catch{
-            print("error")
+            try context.save()
+            completion()
+        } catch {
+            completion()
         }
     }
     
@@ -107,7 +86,7 @@ public class DdayDataManager {
             do {
                 try context.save()
             } catch {
-                print("error saving updated data: \(error)")
+                // 저장 실패는 무시하고 진행
             }
         }
         completion()

@@ -15,6 +15,7 @@ extension DdayData {
         return NSFetchRequest<DdayData>(entityName: "DdayData")
     }
 
+    @NSManaged public var id: UUID?
     @NSManaged public var title: String?
     @NSManaged public var dday: String?
     @NSManaged public var selectedDate: Date?
